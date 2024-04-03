@@ -16,8 +16,21 @@ def kessler_ia(z, z0_scaling = 1.0):
 	rate = rate * 1e9
 	return rate
 
+def rate_madau(z):
+	"""
+	From https://www.annualreviews.org/doi/full/10.1146/annurev-astro-081811-125615
+	Eqn 15
+	"""
+	A = 2.7
+	B = 2.9
+	C = 5.6
+	# An addition 1+z due to time dilation
+	rate = (1 + z)**A / (1 + ((1 + z)/B)**C) / (1 + z)
+	return rate
 
-def rate_strolger(z, z0_scaling = 1.0):
+
+
+def rate_strolger(z):
 	"""
 	From https://iopscience.iop.org/article/10.1088/0004-637X/813/2/93/pdf
 	Eqn 9
@@ -31,20 +44,20 @@ def rate_strolger(z, z0_scaling = 1.0):
 	return rate
 
 
-def calc_rate(redshifts, efficiencies, rate_func, rate_z0 = 1, save=True, filename='rates'):
-	eff_func = interpolate.interp1d(redshifts, efficiencies, bounds_error=False, fill_value=0.0)
+def calc_rate(redshifts, efficiencies, rate_func, rate_z0 = 1):
+	eff_func = interpolate.interp1d(redshifts, efficiencies, axis=0, bounds_error=False, fill_value=0.0)
 
 	#Do volumetric calculation
-	high_densityredshifts = np.linspace(np.min(redshifts),np.max(redshifts),100)
 	if (type(rate_func) == float) | (type(rate_func) == int):
 		rate = rate * u.Gpc**-3 * u.year**-1 / (1 + redshifts)
 	else:
-		rate = rate_z0 * rate_func(redshifts) * u.Gpc**-3 * u.year**-1
-	integrand =  4. * np.pi * rate * cosmo.differential_comoving_volume(redshifts) * eff_func(redshifts)
-	integral = np.trapz(integrand, redshifts)
+		rate = rate_z0 * rate_func(redshifts) *  u.Gpc**-3 * u.year**-1
+	print(rate)
+	rate = np.repeat(rate[None,:], np.shape(efficiencies[-1]), axis=0).T
+	dVs = cosmo.differential_comoving_volume(redshifts)
+	dVs = np.repeat(dVs[None, :], np.shape(efficiencies[-1]), axis=0).T
+	integrand =  4. * np.pi * rate * dVs * eff_func(redshifts)
+	integral = np.trapz(integrand, redshifts, axis=0)
 	total_rate = integral * u.year.decompose()
-	if save:
-		my_file_name = './products/'+filename + '.npz'
-		np.savez(my_file_name, redshifts=redshifts, rates=integrand)
 
 	return(integrand, total_rate.decompose(bases=u.cgs.bases))

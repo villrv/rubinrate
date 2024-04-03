@@ -12,6 +12,7 @@ import matplotlib.pyplot as plt
 import astropy.units as u
 import models
 import time
+from lightcurves import LightCurve
 
 
 
@@ -28,16 +29,16 @@ band_wvs = 1./ (0.0001 * np.asarray([3751.36, 4741.64, 6173.23, 7501.62, 8679.19
 band_wvs = band_wvs * (1./u.micron)
 
 
-def run_sim(metrics, my_model, redshifts, patience):
-
+def run_sim(metrics, my_model, redshifts, patience, bigN, keep_LCs = False):
 	# This reads in the OpSim File
 	# This file is a database containing many,many pointings of LSST
-	conn = sqlite3.connect("./data/baseline_nexp1_v1.7_10yrs.db")    
+	conn = sqlite3.connect("./data/baseline_v3.3_10yrs.db")  
+	#conn = sqlite3.connect("./data/baseline_nexp1_v1.7_10yrs.db")  
 
 	#Now in order to read in pandas dataframe we need to know table name
 	cursor = conn.cursor()
 	cursor.execute("SELECT name FROM sqlite_master WHERE type='table';")
-	df = pd.read_sql_query('SELECT fieldRA, fieldDec, seeingFwhmEff, observationStartMJD, filter, fiveSigmaDepth, skyBrightness  FROM SummaryAllProps', conn)
+	df = pd.read_sql_query('SELECT fieldRA, fieldDec, seeingFwhmEff, observationStartMJD, filter, fiveSigmaDepth, skyBrightness  FROM observations', conn)
 	conn.close()
 
 	patience_counter = 0
@@ -59,28 +60,33 @@ def run_sim(metrics, my_model, redshifts, patience):
 		filt_dict[band] = func
 
 	# Inject as a function of redshift
-	efficiencies = np.zeros(len(redshifts))
 	tmin = np.min(df['observationStartMJD'])
 	tmax = np.max(df['observationStartMJD'])
+	metric_tracker = np.zeros((len(redshifts), len(metrics), bigN))
+	all_lc = []
 	for kk, redshift in enumerate(redshifts):
 		if patience_counter > patience:
 			break
 
 		#First, move the LC to be at the time of injection
 		counter = 0 
-		bigN = 10
 		# I'm going to inject this LC bigN times
-		metric_counter = np.zeros(len(metrics))
 		d = cosmo.luminosity_distance(redshift).value # in Mpc
 		d = d * 3.086e+24 #in cm
 
 		for j in np.arange(bigN):
+			model_theta = []
 			if type(my_model) == models.ModelGrid:
 				my_specific_model = my_model.sample()
 				t = my_specific_model.times
 				lamS_full = my_specific_model.wavelengths
 				spec_full = my_specific_model.fluxes
-			
+			elif type(my_model) == models.AnalyticalModel:
+				my_specific_model = my_model.sample()
+				t = my_specific_model.times
+				lamS_full = my_specific_model.wavelengths
+				spec_full = my_specific_model.fluxes
+				model_theta = my_specific_model.theta
 			else:
 				t = my_model.times
 				lamS_full = my_model.wavelengths
@@ -105,6 +111,7 @@ def run_sim(metrics, my_model, redshifts, patience):
 			#Pick a random injection time
 			start_mjd = random.uniform(tmin,tmax)
 			shifted_times = times + start_mjd
+			model_theta.append(start_mjd)
 
 			#Pick a random location on the sky
 			ra = np.random.uniform(0,360)
@@ -133,13 +140,18 @@ def run_sim(metrics, my_model, redshifts, patience):
 			reddened_mags = np.zeros(np.shape(mags))
 			lsst_mags = np.zeros(len(new_db))
 
-			for j, myband in enumerate(band_list):
+			for bandcounter, myband in enumerate(band_list):
 				gind2 = np.where(new_db['filter']== myband)
-				reddened_mags[:,j] = mags[:,j] + ext_list[j]
+				reddened_mags[:,bandcounter] = mags[:,bandcounter] + ext_list[bandcounter]
+
+				# Calculate the peak time and brightness
+				if myband == 'r':
+					tpeak = shifted_times[np.argmin(reddened_mags[:,bandcounter])]
+					peakmag = np.argmin(reddened_mags[:,bandcounter])
 
 				#Resample to match LSST cadence
 				#Youre going to want to replace this with something that repeats periodically
-				my_model_function = interpolate.interp1d(shifted_times, reddened_mags[:,j],
+				my_model_function = interpolate.interp1d(shifted_times, reddened_mags[:,bandcounter],
 										bounds_error=False, fill_value=30.0)
 
 				new_model_mags = my_model_function(new_db['observationStartMJD'].where(new_db['filter']==myband).dropna().values)
@@ -163,12 +175,19 @@ def run_sim(metrics, my_model, redshifts, patience):
 			snr = C/np.sqrt(C/g+(B/g+sig_in**2)*neff)
 			with np.errstate(divide='ignore'):
 				err = 1.09/snr
+			mylc = LightCurve(new_db['observationStartMJD'].values, lsst_mags, 
+								new_db['filter'].values, snr, start_mjd, 
+								tpeak, peakmag, redshift, model_theta)
 
+			# Save LCs if the user requests them...
+			if keep_LCs:
+				all_lc.append(mylc)
 			# Calculate FOMs as function of redshift
 			current_metric_true = False
-			for i, metric in enumerate(metrics):
-				my_metric = metrics[0](snr)
-				metric_counter[i] += my_metric
+			for i, val in enumerate(metrics.items()):
+				func_name, (func, args) = val
+				my_metric = func(mylc, *args)
+				metric_tracker[kk,i,j] = my_metric
 				if my_metric:
 					current_metric_true = True
 			# Save a few LCs as a function of redshift
@@ -178,7 +197,7 @@ def run_sim(metrics, my_model, redshifts, patience):
 
 		if counter == 0:
 			patience_counter+=1
-		print(redshift, metric_counter)
-		efficiencies[kk] = metric_counter / bigN
 
-	return efficiencies
+	if keep_LCs:
+		np.savez('./products/lcs.npz', lcs = all_lc)
+	return metric_tracker

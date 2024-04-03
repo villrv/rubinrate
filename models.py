@@ -48,12 +48,10 @@ class PlasticcModel(TransientModel):
     
     def load(self, filename, dirname):
 
-        with gzip.open(dirname+filename,'rt') as f:
-            data = np.loadtxt(f)
-
-        self.times = data[:,0] * 86400.0
-        self.wavelengths = data[:,1]
-        self.fluxes = data[:,2]
+        data = np.load(dirname+filename)
+        self.times = data['times'] * 86400
+        self.wavelengths = data['wvs']
+        self.fluxes = data['fluxes']
 
 
 class SedonaModel(TransientModel):
@@ -99,6 +97,16 @@ class ModelGrid():
         my_selection = int(np.random.choice(np.arange(len(self.modelList)), 1))
         self.myModel.load(self.modelList[my_selection], self.dirname)
         return self.myModel
+
+class AnalyticalModel():
+    def __init__(self, myModel):
+        self.myModel = myModel
+
+    def sample(self):
+        self.times = 0
+        my_model = self.myModel()
+        my_model.sample()
+        return my_model
 
 
 
