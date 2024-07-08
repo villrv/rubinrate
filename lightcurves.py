@@ -3,7 +3,7 @@ class LightCurve():
     A basic transient model
     """
 
-    def __init__(self, times, mags, filters, snrs, texp, tpeak, rmag, redshift, theta):
+    def __init__(self, times, mags, filters, snrs, texp, tpeak, rmag, redshift, theta, mwebv = 0):
         """
         Parameters:
         ----------
@@ -19,3 +19,4 @@ class LightCurve():
         self.rmag = rmag
         self.redshift = redshift
         self.theta = theta
+        self.mwebv = mwebv

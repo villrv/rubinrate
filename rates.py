@@ -52,7 +52,6 @@ def calc_rate(redshifts, efficiencies, rate_func, rate_z0 = 1):
 		rate = rate * u.Gpc**-3 * u.year**-1 / (1 + redshifts)
 	else:
 		rate = rate_z0 * rate_func(redshifts) *  u.Gpc**-3 * u.year**-1
-	print(rate)
 	rate = np.repeat(rate[None,:], np.shape(efficiencies[-1]), axis=0).T
 	dVs = cosmo.differential_comoving_volume(redshifts)
 	dVs = np.repeat(dVs[None, :], np.shape(efficiencies[-1]), axis=0).T

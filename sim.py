@@ -7,17 +7,17 @@ import random
 from astropy.coordinates import SkyCoord
 from dust_extinction.averages import GCC09_MWAvg
 from dustmaps.sfd import SFDQuery
+import extinction
 import numpy as np
 import matplotlib.pyplot as plt
 import astropy.units as u
 import models
 import time
 from lightcurves import LightCurve
-
+import analytical_models
 
 
 # This defines our dust model
-ext = GCC09_MWAvg()
 sfd = SFDQuery()
 
 
@@ -26,10 +26,12 @@ c_AAs     = 2.99792458e18                       # Speed of light in Angstrom/s
 
 band_list = ['u','g','r','i','z','y']
 band_wvs = 1./ (0.0001 * np.asarray([3751.36, 4741.64, 6173.23, 7501.62, 8679.19, 9711.53]))
-band_wvs = band_wvs * (1./u.micron)
+#band_wvs = band_wvs * (1./u.micron)
 
+band_wvs = np.asarray([3751.36, 4741.64, 6173.23, 7501.62, 8679.19, 9711.53]) # in angstrom
+band_wvs = np.asarray([3751.36, 4741.64, 6173.23, 7501.62, 8679.19, 9711.53]) # in angstrom
 
-def run_sim(metrics, my_model, redshifts, patience, bigN, keep_LCs = False):
+def run_sim(metrics, my_model, redshifts, patience, bigN, dust_Model = None, keep_LCs = False):
 	# This reads in the OpSim File
 	# This file is a database containing many,many pointings of LSST
 	conn = sqlite3.connect("./data/baseline_v3.3_10yrs.db")  
@@ -65,6 +67,7 @@ def run_sim(metrics, my_model, redshifts, patience, bigN, keep_LCs = False):
 	metric_tracker = np.zeros((len(redshifts), len(metrics), bigN))
 	all_lc = []
 	for kk, redshift in enumerate(redshifts):
+		print('Redshift:',redshift)
 		if patience_counter > patience:
 			break
 
@@ -87,6 +90,12 @@ def run_sim(metrics, my_model, redshifts, patience, bigN, keep_LCs = False):
 				lamS_full = my_specific_model.wavelengths
 				spec_full = my_specific_model.fluxes
 				model_theta = my_specific_model.theta
+			elif type(my_model) == analytical_models.gaussian.GaussianModel:
+				my_specific_model = my_model
+				my_specific_model.sample()
+				t = my_specific_model.times
+				lamS_full = my_specific_model.wavelengths
+				spec_full = my_specific_model.fluxes
 			else:
 				t = my_model.times
 				lamS_full = my_model.wavelengths
@@ -132,9 +141,14 @@ def run_sim(metrics, my_model, redshifts, patience, bigN, keep_LCs = False):
 			coords = SkyCoord(ra,dec, frame='icrs', unit="deg")
 			ebv = sfd(coords)
 
-			#Now figure out how much the magnitude is affected by this dust
-			ext_list = ext.extinguish(band_wvs, Ebv=ebv)
-
+			# Now figure out how much the magnitude is affected by this dust...this is only for the MW
+			ext_list = extinction.fitzpatrick99(band_wvs, ebv * 3.1, 3.1)  # I know this says use Av, but it clearly uses ebv...
+			# now do the host...remember that the wavelengths are different...
+			if dust_Model is not None:
+				host_ebv = dust_Model.sample()
+				host_ext_list = extinction.fitzpatrick99(band_wvs / (1. + redshift), host_ebv * 3.1)
+			else:
+				host_ext_list = ext_list * 0.0
 			#For each filter, dim the model light curve by this dust
 			#blue filters will get more affected than red
 			reddened_mags = np.zeros(np.shape(mags))
@@ -142,7 +156,7 @@ def run_sim(metrics, my_model, redshifts, patience, bigN, keep_LCs = False):
 
 			for bandcounter, myband in enumerate(band_list):
 				gind2 = np.where(new_db['filter']== myband)
-				reddened_mags[:,bandcounter] = mags[:,bandcounter] + ext_list[bandcounter]
+				reddened_mags[:,bandcounter] = mags[:,bandcounter] + ext_list[bandcounter] + host_ext_list[bandcounter]
 
 				# Calculate the peak time and brightness
 				if myband == 'r':
@@ -156,6 +170,7 @@ def run_sim(metrics, my_model, redshifts, patience, bigN, keep_LCs = False):
 
 				new_model_mags = my_model_function(new_db['observationStartMJD'].where(new_db['filter']==myband).dropna().values)
 				lsst_mags[gind2] = new_model_mags
+
 
 
 			#now lets add noise to the LC...this involves eqns..
@@ -173,11 +188,19 @@ def run_sim(metrics, my_model, redshifts, patience, bigN, keep_LCs = False):
 			my_integrals = 10.**(-0.4*(new_db['skyBrightness'].values+48.6)) * [func_dict.get(key) for key in new_db['filter'].values]
 			B= expTime * np.pi * 321.15**2 / g / h * my_integrals * (pixscale)**2
 			snr = C/np.sqrt(C/g+(B/g+sig_in**2)*neff)
+			gind_snr = np.where(snr > 20)
+			snr[gind_snr] = 20
+			gind_snr = np.where(snr < 0.0001)
+			snr[gind_snr] = 0.0001
 			with np.errstate(divide='ignore'):
 				err = 1.09/snr
+
+			lsst_mags = lsst_mags + np.random.normal(0, err)
 			mylc = LightCurve(new_db['observationStartMJD'].values, lsst_mags, 
 								new_db['filter'].values, snr, start_mjd, 
-								tpeak, peakmag, redshift, model_theta)
+								tpeak, peakmag, redshift, model_theta, mwebv = ebv)
+
+
 
 			# Save LCs if the user requests them...
 			if keep_LCs:

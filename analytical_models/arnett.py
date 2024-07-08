@@ -53,33 +53,36 @@ def blackbody_flux(temperature, radius, wavelength):
 
 
 
-class SLSNModel(AnalyticalModel):
+class ArnettModel(AnalyticalModel):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         # Additional initialization for SLSN model
 
         # Build SLSN Model...including improved Arnett model
-    def gen_magnetar_model(self, t, wvs, theta):
-        pspin, bfield, mns, \
-        thetapb, texp, kappa, \
-        kappagamma, mej, vej, tfloor = theta
+    def gen_arnett_model(self, t, wvs, theta):
+        mej, fni, vej, tfloor = theta
+        # Convert to grams
+        mej = mej * M_SUN_CGS
+        mni = mej * fni
+        # Convert velocity to cm/s
+        vej = vej * 1e8
+        tni = 8.8  # days
+        tco = 111.3  # days
+        epco = 6.8e9  # erg/g/s
+        epni = 3.9e10  # erg/g/s
+        opac = 0.1
+        texp = 0
+        # Diffusion timescale in days
+        td = np.sqrt(2 * opac * mej / (13.7 * C_CGS * vej)) / 86400  # convert seconds to days
 
-        Ep = 2.6 * (mns / 1.4) ** (3. / 2.) * pspin ** (-2)
-        # ^ E_rot = 1/2 I (2pi/P)^2, unit = erg
-        tp = 1.3e5 * bfield ** (-2) * pspin ** 2 * (
-            mns / 1.4) ** (3. / 2.) * (np.sin(thetapb)) ** (-2)
-        tau_diff = np.sqrt(DIFF_CONST * kappa *
-                                    mej / vej) / DAY_CGS
+        integrand1 = (t / td) * np.exp(t**2 / td**2 - t / tni)
+        integrand2 = (t / td) * np.exp(t**2 / td**2 - t / tco)
 
-        A = (TRAP_CONST * kappagamma * mej / (vej ** 2)) / DAY_CGS ** 2
-        td2 =  tau_diff ** 2
+        # Luminosity calculation
+        luminosities = 2 * mni / (td) * np.exp(-t**2 / td**2) * \
+              ((epni - epco) * cumtrapz(integrand1, t, initial=0) + 
+               epco * cumtrapz(integrand2, t, initial=0))
 
-        lum_inp = 2.0 * Ep / tp / (1. + 2.0 * t * DAY_CGS / tp) ** 2
-
-        integrand = 2* lum_inp * t/tau_diff * np.exp((t/tau_diff)**2)  * 1e52
-
-        multiplier =  (1.0 - np.exp(-A*t**-2)) * np.exp(-(t/tau_diff)**2) 
-        luminosities = multiplier * cumtrapz(integrand, t, initial = 0)
 
         #Do BB calculation
         radius = RAD_CONST * vej * ((t - texp) * ((t-texp)>0))
@@ -95,36 +98,22 @@ class SLSNModel(AnalyticalModel):
 
     def sample(self):
         #bfield = 10.**np.random.uniform(-2,1)
-        lower, upper = 0.01, 10
-        mu, sigma = 0.8, 1.1
-        bfield = stats.truncnorm((lower - mu) / sigma, (upper - mu) / sigma, loc=mu, scale=sigma).rvs(1)[0]
-
-#        pspin = np.random.uniform(0.7, 20)
-        lower, upper = 0.7, 20
-        mu, sigma = 2.4, 1.0
-        pspin = stats.truncnorm((lower - mu) / sigma, (upper - mu) / sigma, loc=mu, scale=sigma).rvs(1)[0]
-
-        mns = 1.4
-        thetapb = np.pi/2.0
-        texp = 0.0
-        kappa = 0.1126
-        kappagamma = 0.1
-        #mej = 10.**np.random.uniform(-1,1.3)
-        lower, upper = 0.1, 20
-        mu, sigma = 4.8, 2.0
+        lower, upper = 0.5, 20
+        mu, sigma = 3.0, 0.5
         mej = stats.truncnorm((lower - mu) / sigma, (upper - mu) / sigma, loc=mu, scale=sigma).rvs(1)[0]
 
+        lower, upper = 3.0, 20
+        mu, sigma = 10.0, 1
+        vej = stats.truncnorm((lower - mu) / sigma, (upper - mu) / sigma, loc=mu, scale=sigma).rvs(1)[0]
 
+        lower, upper = 0.01, 1.0
+        mu, sigma = 0.2, 0.02
+        fni = stats.truncnorm((lower - mu) / sigma, (upper - mu) / sigma, loc=mu, scale=sigma).rvs(1)[0]
 
-        lower, upper = 0.1, 3
-        mu, sigma = 1.47, 4.3
-        vej = stats.truncnorm((lower - mu) / sigma, (upper - mu) / sigma, loc=mu, scale=sigma).rvs(1)[0] * 1e4
-        tfloor = 6000
+        tfloor = 3000
 
-        theta = [pspin, bfield, mns, \
-        thetapb, texp, kappa, \
-        kappagamma, mej, vej, tfloor]
+        theta = [mej, fni, vej, tfloor]
         self.times = np.linspace(0.1,200,200) * 86400.0
         self.wavelengths = np.linspace(2000,10000,200)
-        self.fluxes = self.gen_magnetar_model(self.times / 86400, self.wavelengths, theta)
+        self.fluxes = self.gen_arnett_model(self.times / 86400, self.wavelengths, theta)
         self.theta = theta

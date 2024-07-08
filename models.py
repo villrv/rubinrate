@@ -109,4 +109,3 @@ class AnalyticalModel():
         return my_model
 
 
-
