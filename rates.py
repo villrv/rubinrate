@@ -49,12 +49,22 @@ def calc_rate(redshifts, efficiencies, rate_func, rate_z0 = 1):
 
 	#Do volumetric calculation
 	if (type(rate_func) == float) | (type(rate_func) == int):
-		rate = rate * u.Gpc**-3 * u.year**-1 / (1 + redshifts)
+		rate = rate_func * u.Gpc**-3 * u.year**-1 / (1 + redshifts)
 	else:
 		rate = rate_z0 * rate_func(redshifts) *  u.Gpc**-3 * u.year**-1
-	rate = np.repeat(rate[None,:], np.shape(efficiencies[-1]), axis=0).T
-	dVs = cosmo.differential_comoving_volume(redshifts)
-	dVs = np.repeat(dVs[None, :], np.shape(efficiencies[-1]), axis=0).T
+
+	if efficiencies.ndim == 1:
+		dVs = cosmo.differential_comoving_volume(redshifts)
+		integrand = 4. * np.pi * rate * dVs * eff_func(redshifts)
+	else:
+		rate = np.repeat(rate[None, :], np.shape(efficiencies[-1]), axis=0).T
+		dVs = cosmo.differential_comoving_volume(redshifts)
+		dVs = np.repeat(dVs[None, :], np.shape(efficiencies[-1]), axis=0).T
+		integrand = 4. * np.pi * rate * dVs * eff_func(redshifts)
+
+	#rate = np.repeat(rate[None,:], np.shape(efficiencies[-1]), axis=0).T
+	#dVs = cosmo.differential_comoving_volume(redshifts)
+	#dVs = np.repeat(dVs[None, :], np.shape(efficiencies[-1]), axis=0).T
 	integrand =  4. * np.pi * rate * dVs * eff_func(redshifts)
 	integral = np.trapz(integrand, redshifts, axis=0)
 	total_rate = integral * u.year.decompose()

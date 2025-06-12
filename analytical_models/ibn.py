@@ -2,7 +2,7 @@ import numpy as np
 import matplotlib
 #matplotlib.use('AGG') 
 import matplotlib.pyplot as plt
-from scipy.integrate import cumtrapz
+from scipy.integrate import cumulative_trapezoid as cumtrapz
 import astropy.constants as c
 import astropy.units as u
 from scipy import interpolate
@@ -14,7 +14,7 @@ import scipy.stats as stats
 from scipy.integrate import solve_ivp
 import scipy.integrate as integrate
 from os import listdir
-from os.path import isfile, join
+from os.path import isfile, isdir, join
 import json
 
 
@@ -152,7 +152,7 @@ def blackbody_flux(temperature, radius, wavelength):
 
 
 
-class CSMModel(AnalyticalModel):
+class IbnModel(AnalyticalModel):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         # Additional initialization for SLSN model
@@ -160,7 +160,7 @@ class CSMModel(AnalyticalModel):
         # Build CSM/IIn Model...including improved Arnett model
     def gen_csm_model(self, times, wvs, theta):
 
-        t_exp, s,n, delta, R0, Mcsm, mej, vej, Rho, efficiency, tfloor = theta
+        t_exp, s,n, delta, R0, Mcsm, mej, vej, Rho, efficiency, tfloor, opac = theta
         # Shift times 
         times = (times + t_exp) * 60 * 60 * 24  # convert days to seconds
 
@@ -179,7 +179,6 @@ class CSMModel(AnalyticalModel):
         Bfs, Brs, A = ratiofinder(s, n)
 
         # Parameters 
-        opac = 0.34 # fixing opacity
         Rinitial = R0 * AU 
         rho = 10.**Rho
         mcsm = Mcsm * sun_mass 
@@ -192,6 +191,7 @@ class CSMModel(AnalyticalModel):
         ti = 1.0
         Rcsm = (((3.0 - s) / (4.0 * np.pi * q) * mcsm 
              + Rinitial ** (3.0 - s)) ** (1.0 / (3.0 - s)))
+
 
         # There's a discontinuity here where when s = 1, we have a divide by zero error
         if np.isclose(s, 1):
@@ -241,6 +241,7 @@ class CSMModel(AnalyticalModel):
                     integrate.cumtrapz(integral_funcion_evals, x=time_lin, initial=0)
         
         luminosities = np.interp(times, time_lin, L_obs)
+
         
         #..and now I need to calc lums!
         #Do BB calculation
@@ -253,6 +254,8 @@ class CSMModel(AnalyticalModel):
 
         radius = np.sqrt(luminosities / (STEF_CONST * temperature**4))
         fluxes = blackbody_flux(temperature, radius, wvs)
+
+
         return fluxes
 
     def sample(self):
@@ -263,27 +266,43 @@ class CSMModel(AnalyticalModel):
         self.wavelengths = np.linspace(2000,10000,200)
         delta = 0
         epsilon = 0.5
-
-        dirname = './data/iin_walkers/'
-        fileList = [f for f in listdir(dirname) if isfile(join(dirname, f))]
-        # Get all files...
-        sn_not_selected = True
-
-        #debugging counter
-        counter = 0
         peak_mags = []
-        while sn_not_selected:
 
-            #debugging counter
-            counter = counter + 1
-            # Select random walker file..
+
+        '''
+        for i in np.arange(100):
+          # Set my parameters...
+          tfloor = 1000 * stats.truncnorm(1,20,12.33,3.1).rvs(1)[0]
+          s = stats.truncnorm(0,2,1.44,0.3).rvs(1)[0]
+          n = stats.truncnorm(7,12,7.66,1).rvs(1)[0]
+          R0 = 1e14 / (1.496e13)* stats.truncnorm(0.02, 50, 15.62, 12.2).rvs(1)[0]
+          mcsm = 10.**stats.truncnorm(-3, 1.48, -1, 1).rvs(1)[0]
+          mej = 10.**stats.truncnorm(-1, 1.48, -2.5, 0.5).rvs(1)[0]
+          vej = 1000 * stats.truncnorm(0,12, 4.57, 2).rvs(1)[0]
+          rho = np.log10(1e-15 * 10.**stats.truncnorm(-2, 5, -1.22, 4).rvs(1)[0]) #needs to be logged
+          opac = stats.truncnorm(0.1,0.4, 0.23, 0.11).rvs(1)[0]
+
+          theta = [t_exp, s,n, delta, \
+                  R0, mcsm, mej, vej, rho, \
+                  epsilon, tfloor, opac]
+        '''
+        dirname = './data/ibn/'
+        fileList = [f for f in listdir(dirname) if isdir(join(dirname, f))]
+
+        for i in np.arange(50):
+            print(i)
+
+
             my_walker_file = np.random.choice(fileList)
 
-            myfile = open(dirname+my_walker_file)
+            myfile = open(dirname+my_walker_file+'/walkers.json')
             all_walker_data = json.load(myfile)
             myfile.close()
             # Choose random realization...
-            my_realization = np.random.choice(all_walker_data[list(all_walker_data.keys())[0]]['models'][0]['realizations'])
+            realizations = all_walker_data[list(all_walker_data.keys())[0]]['models'][0]['realizations']
+            weights = np.array([realization['weight'] for realization in realizations], dtype=float)
+            weights /= weights.sum()
+            my_realization = np.random.choice(realizations, p=weights)
 
             # Set my parameters...
             tfloor = my_realization['parameters']['temperature']['value']
@@ -294,47 +313,26 @@ class CSMModel(AnalyticalModel):
             mej = my_realization['parameters']['mejecta']['value']
             vej = my_realization['parameters']['vejecta']['value']
             rho = np.log10(my_realization['parameters']['rho']['value'])
+            opac = my_realization['parameters']['kappa']['value']
 
             theta = [t_exp, s,n, delta, \
                     R0, mcsm, mej, vej, rho, \
-                    epsilon, tfloor]
-            #calculate the r-band...
+                    epsilon, tfloor, opac]
+
+            self.fluxes = self.gen_csm_model(self.times / 86400, self.wavelengths, theta)
+            self.theta = theta
             rband_mag = self.gen_csm_model(self.times / 86400, np.asarray([6366]), theta)
+
             constant = 4. * np.pi * pc10**2# convert a luminosity to a flux
             rband_mag = rband_mag / ANG_CGS# first convert to erg/s/cm
             rband_mag = rband_mag *  (6366 * ANG_CGS)**2 / C_CGS
             rband_mag = -2.5 * np.log10(rband_mag / constant) - 48.6
             peak_mag = np.min(rband_mag)
-            #peak_mags.append(peak_mag)
 
+            if not np.isfinite(peak_mag):
+                continue
 
-            # THIS REPRESENTS THE OBSERVED DIST
-            mu_proposal, sigma_proposal = -18.94, 1.0
-            # THIS IS THE DESIRED ONE...
-            mu_target, sigma_target = -18.72, 1.0
-
-
-            # Step 2: Calculate the PDF values for the target and proposal distributions
-            target_pdf = (1 / (sigma_target * np.sqrt(2 * np.pi))) * np.exp(-0.5 * ((peak_mag - mu_target) / sigma_target)**2)
-            proposal_pdf = (1 / (sigma_proposal * np.sqrt(2 * np.pi))) * np.exp(-0.5 * ((peak_mag - mu_proposal) / sigma_proposal)**2)
-
-
-            # Step 3: Calculate the acceptance ratio
-            normalizing_constant = 1.0 #found by hand - max ratio of target / proposal
-            acceptance_ratio = target_pdf / (proposal_pdf * normalizing_constant)
-
-            # Step 4: Generate uniform random numbers for acceptance criteria
-            uniform_random = np.random.uniform(0, 1)
-
-            # Step 5: Accept or reject samples
-            #if counter > 300:
-            #  sn_not_selected = False
-            if uniform_random < acceptance_ratio:
-                sn_not_selected = False
-        #peak_mags = np.array(peak_mags)
-        #print(np.nanmean(peak_mags), np.nanstd(peak_mags))
-        #plt.hist(peak_mags)
-        #plt.show()
-        #sys.exit()
-        self.fluxes = self.gen_csm_model(self.times / 86400, self.wavelengths, theta)
-        self.theta = theta
+            peak_mags = np.append(peak_mags, peak_mag)
+        plt.hist(peak_mags)
+        plt.show()
+        sys.exit()

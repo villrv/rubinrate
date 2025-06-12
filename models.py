@@ -72,14 +72,25 @@ class SedonaModel(TransientModel):
         self.times = []
         self.fluxes = []
         self.wavelengths = []
-    def load(self, filename):
+    def load(self, filename, dirname):
         all_models = []
-        model_file = './data/'+filename
+        model_file = dirname+filename
         time_model, wavelength_model, flux_model = np.loadtxt(model_file, \
                                                     skiprows=1, unpack=True)
-        self.times = time_model
-        self.fluxes = flux_model
-        self.wavelengths = wavelength_model
+        self.times = np.unique(time_model)
+        self.wavelengths =np.unique(wavelength_model)
+        # Create an empty 2D array to hold fluxes
+        self.fluxes = np.zeros((len(self.times), len(self.wavelengths)))
+
+        # Map the original time and wavelength arrays to the unique indices
+        time_indices = np.searchsorted(self.times, time_model)
+        wavelength_indices = np.searchsorted(self.wavelengths, wavelength_model)
+
+        # Populate the flux grid by mapping each flux value to its (time, wavelength) position
+        for t_idx, w_idx, flux in zip(time_indices, wavelength_indices, flux_model):
+            self.fluxes[t_idx, w_idx] = flux
+
+
 
     def generate(time, param):
         return 0
@@ -107,5 +118,6 @@ class AnalyticalModel():
         my_model = self.myModel()
         my_model.sample()
         return my_model
+
 
 

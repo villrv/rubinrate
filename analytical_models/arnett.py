@@ -2,7 +2,7 @@ import numpy as np
 import matplotlib
 #matplotlib.use('AGG') 
 import matplotlib.pyplot as plt
-from scipy.integrate import cumtrapz
+from scipy.integrate import cumulative_trapezoid as cumtrapz
 import astropy.constants as c
 import astropy.units as u
 from scipy import interpolate
@@ -42,7 +42,7 @@ def blackbody_flux(temperature, radius, wavelength):
         rad = radius[i]
 
         # Calculate the black body flux density using Planck's law
-        numerator = 2 * c.h * C_CGS**2 / wavelength_cm**5
+        numerator = (4 * np.pi) * 2 * c.h * C_CGS**2 / wavelength_cm**5
         exponent = c.h * C_CGS / (wavelength_cm * c.k_B * temp)
         denominator = np.exp(exponent.value) - 1
         flux_density_erg_per_s_per_cm2_per_angstrom = numerator / denominator

@@ -1,6 +1,6 @@
 import numpy as np
-from lightcurves import LightCurve
-
+from rubinrate.lightcurves import LightCurve
+import matplotlib.pyplot as plt
 
 def snr(lc, num=3, sigma=3):
     snr_count = np.sum(lc.snrs>sigma)
@@ -35,7 +35,10 @@ def during_fall(lc,  num=3, sigma=3):
 # peak mag
 def brighter_than_mag(lc,  peakmag=22, sigma=3, num = 1):
     # figure out within duration
-    point_count = np.sum((np.min(lc.mags) < peakmag) & (lc.snrs > sigma))
+    gind = np.where(lc.snrs>sigma)
+    if len(gind[0]) < 1:
+        return 0
+    point_count = np.sum((np.min(lc.mags[gind]) < peakmag) & (lc.snrs > sigma))
     if point_count < num:
         return 0
     else:

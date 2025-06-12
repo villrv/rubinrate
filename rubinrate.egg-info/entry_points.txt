@@ -1,0 +1,2 @@
+[console_scripts]
+rubinrate = rubinrate.core:main

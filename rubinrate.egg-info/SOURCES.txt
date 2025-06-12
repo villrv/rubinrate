@@ -1,0 +1,8 @@
+README.md
+setup.py
+rubinrate.egg-info/PKG-INFO
+rubinrate.egg-info/SOURCES.txt
+rubinrate.egg-info/dependency_links.txt
+rubinrate.egg-info/entry_points.txt
+rubinrate.egg-info/requires.txt
+rubinrate.egg-info/top_level.txt

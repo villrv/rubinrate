@@ -1,0 +1,8 @@
+Metadata-Version: 2.1
+Name: rubinrate
+Version: 0.1
+Requires-Dist: numpy
+Requires-Dist: matplotlib
+Requires-Dist: sqlalchemy
+Requires-Dist: tqdm
+Requires-Dist: astropy

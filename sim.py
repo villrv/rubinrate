@@ -1,5 +1,6 @@
+import pkg_resources
 from astropy.cosmology import WMAP9 as cosmo
-from scipy.integrate import simps
+from scipy.integrate import simpson as simps
 from scipy import interpolate
 import sqlite3
 import pandas as pd
@@ -11,16 +12,19 @@ import extinction
 import numpy as np
 import matplotlib.pyplot as plt
 import astropy.units as u
-import models
+from rubinrate import models
 import time
-from lightcurves import LightCurve
-import analytical_models
-
+from rubinrate.lightcurves import LightCurve
+from rubinrate import analytical_models
 
 # This defines our dust model
 sfd = SFDQuery()
 
+def get_filter_file_path(filename):
+    return pkg_resources.resource_filename('rubinrate', f'filters/{filename}')
 
+def get_db_file_path():
+	return pkg_resources.resource_filename('rubinrate',f'data/baseline_v3.4_10yrs.db') #only using this because it is local
 
 c_AAs     = 2.99792458e18                       # Speed of light in Angstrom/s
 
@@ -29,12 +33,12 @@ band_wvs = 1./ (0.0001 * np.asarray([3751.36, 4741.64, 6173.23, 7501.62, 8679.19
 #band_wvs = band_wvs * (1./u.micron)
 
 band_wvs = np.asarray([3751.36, 4741.64, 6173.23, 7501.62, 8679.19, 9711.53]) # in angstrom
-band_wvs = np.asarray([3751.36, 4741.64, 6173.23, 7501.62, 8679.19, 9711.53]) # in angstrom
 
 def run_sim(metrics, my_model, redshifts, patience, bigN, dust_Model = None, keep_LCs = False):
 	# This reads in the OpSim File
 	# This file is a database containing many,many pointings of LSST
-	conn = sqlite3.connect("./data/baseline_v3.3_10yrs.db")  
+
+	conn = sqlite3.connect(get_db_file_path())  
 	#conn = sqlite3.connect("./data/baseline_nexp1_v1.7_10yrs.db")  
 
 	#Now in order to read in pandas dataframe we need to know table name
@@ -49,7 +53,9 @@ def run_sim(metrics, my_model, redshifts, patience, bigN, dust_Model = None, kee
 	function_list = np.asarray([])
 	filter_list = np.asarray([])
 	for band in band_list:
-		blah = np.loadtxt('./filters/LSST_LSST.'+band+'.dat')
+		filter_path = get_filter_file_path(f'LSST_total.{band}.dat')
+		blah = np.loadtxt(filter_path)
+		blah[:,0] = blah[:,0] * 10 # convert to Angstrom
 		function_list = np.append(function_list,np.trapz(blah[:,1]/blah[:,0],blah[:,0]))
 		filter_list = np.append(filter_list,interpolate.interp1d(blah[:,0],blah[:,1],bounds_error=False,fill_value=0.0))
 	func_dict = {}
@@ -90,22 +96,37 @@ def run_sim(metrics, my_model, redshifts, patience, bigN, dust_Model = None, kee
 				lamS_full = my_specific_model.wavelengths
 				spec_full = my_specific_model.fluxes
 				model_theta = my_specific_model.theta
-			elif type(my_model) == analytical_models.gaussian.GaussianModel:
-				my_specific_model = my_model
-				my_specific_model.sample()
-				t = my_specific_model.times
-				lamS_full = my_specific_model.wavelengths
-				spec_full = my_specific_model.fluxes
-			else:
+			#elif type(my_model) == analytical_models.gaussian.GaussianModel:
+			#	my_specific_model = my_model
+			#	my_specific_model.sample()
+			#	t = my_specific_model.times
+			#	lamS_full = my_specific_model.wavelengths
+			#	spec_full = my_specific_model.fluxes
+			elif type(my_model) == models.SNCosmoModel:
+				my_model.load()
 				t = my_model.times
 				lamS_full = my_model.wavelengths
 				spec_full = my_model.fluxes
+
+			elif type(my_model) == models.SedonaModel:
+				my_specific_model = my_model
+				t = my_model.times
+				lamS_full = my_model.wavelengths
+				spec_full = my_model.fluxes
+
+			else:
+				my_specific_model = my_model.sample()
+				t = my_specific_model.times
+				lamS_full = my_specific_model.wavelengths
+				spec_full = my_specific_model.fluxes
 
 			t = t * (1. + redshift)
 			max_phase = np.max(t) * 1.15741e-5
 			mags = np.zeros((len(t),6))
 			for jj, my_filt in enumerate(band_list):
-				lamF,filt = np.loadtxt('./filters/LSST_LSST.'+my_filt+'.dat'  ,unpack=True) #Two columns with wavelength and response in the range [0,1]
+				filter_path = get_filter_file_path(f'LSST_total.{my_filt}.dat')
+				lamF,filt = np.loadtxt(filter_path,unpack=True) #Two columns with wavelength and response in the range [0,1]
+				lamF = lamF * 10 # to Angstrom
 				lamS = lamS_full * (1.+redshift)
 				spec = spec_full / (1. + redshift)
 				spec_int  = interpolate.interp1d(lamS,spec, axis=1, bounds_error=False,fill_value = 0)(lamF)
@@ -199,7 +220,6 @@ def run_sim(metrics, my_model, redshifts, patience, bigN, dust_Model = None, kee
 			mylc = LightCurve(new_db['observationStartMJD'].values, lsst_mags, 
 								new_db['filter'].values, snr, start_mjd, 
 								tpeak, peakmag, redshift, model_theta, mwebv = ebv)
-
 
 
 			# Save LCs if the user requests them...

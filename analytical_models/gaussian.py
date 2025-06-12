@@ -2,7 +2,7 @@ import numpy as np
 import matplotlib
 #matplotlib.use('AGG') 
 import matplotlib.pyplot as plt
-from scipy.integrate import cumtrapz
+from scipy.integrate import cumulative_trapezoid as cumtrapz
 import astropy.constants as c
 import astropy.units as u
 from scipy import interpolate
@@ -44,11 +44,11 @@ def blackbody_flux(temperature, radius, wavelength):
         rad = radius[i]
 
         # Calculate the black body flux density using Planck's law
-        numerator = 2 * c.h * C_CGS**2 / wavelength_cm**5
+        numerator = (4 * np.pi) * 2 * c.h * C_CGS**2 / wavelength_cm**5
         exponent = c.h * C_CGS / (wavelength_cm * c.k_B * temp)
         denominator = np.exp(exponent.value) - 1
         flux_density_erg_per_s_per_cm2_per_angstrom = numerator / denominator
-        flux_density_erg_per_s_per_per_angstrom = flux_density_erg_per_s_per_cm2_per_angstrom * 4. * np.pi * rad**2
+        flux_density_erg_per_s_per_per_angstrom = flux_density_erg_per_s_per_cm2_per_angstrom *  np.pi * rad**2
         all_fluxes[i,:] = flux_density_erg_per_s_per_per_angstrom
 
     return all_fluxes 
@@ -66,13 +66,14 @@ class GaussianModel(AnalyticalModel):
 
     def gen_gaussian_light_curve(self, times):
         # Gaussian function centered at the midpoint of times with FWHM = duration
-        midpoint = np.mean(times)
+        midpoint = 250
         sigma = self.duration / (2 * np.sqrt(2 * np.log(2)))
-        luminosities = self.peak_luminosity * norm.pdf(times, midpoint, sigma)
+        luminosities = self.peak_luminosity * norm.pdf(times, midpoint, sigma) / np.max(norm.pdf(times, midpoint, sigma))
+
         return luminosities
 
     def sample(self):
-        self.times = np.linspace(0, 100, 200) * 86400.0  # Example: 0 to 100 days in seconds
+        self.times = np.linspace(0, 500, 200) * 86400.0  # Example: 0 to 100 days in seconds
         self.wavelengths = np.linspace(2000, 10000, 200)  # Example: 2000 to 10000 Angstrom
         luminosities = self.gen_gaussian_light_curve(self.times / 86400)  # Generate light curve
         
